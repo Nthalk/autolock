@@ -19,7 +19,7 @@ hand-written HA scripts — the lock integration call is built by a Go driver.
    clear-code (after checkout) — and perform any whose target falls in the
    current window via the calendar's lock driver.
 
-Run it from cron; it's a one-shot that acts only on due actions.
+Run it as a daemon, or one-shot from cron; either way it acts only on due actions.
 
 ## Install
 
