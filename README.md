@@ -1,5 +1,7 @@
 # airlock
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Reads an Airbnb hosting iCal feed and programs a Home Assistant smart lock around
 each reservation — set the guest's code before check-in, clear it after checkout.
 The door code is the last 4 digits of the guest's phone number, which Airbnb
@@ -176,3 +178,7 @@ Tokens filled at call time: `__ENTITY__` (lock entity_id), `__SLOT__` (code
 slot — emitted as a number when it's the whole value, else inline), `__CODE__`
 (guest phone last 4). A driver is "available" when its `set` service is
 registered in HA, which is what `-setup` and `-locks` check.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
