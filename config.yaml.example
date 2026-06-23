@@ -3,7 +3,7 @@
 # around each Airbnb reservation.
 
 ha:
-  url: https://ha.example.com
+  url: http://homeassistant.local:8123
   # Long-lived access token: HA -> Profile -> Security -> Long-Lived Access Tokens
   token: ""
 

@@ -57,7 +57,7 @@ cp config.yaml.example config.yaml
 
 Fill in:
 
-- `ha.url` — `https://ha.iodesystems.com`
+- `ha.url` — your HA address, e.g. `http://homeassistant.local:8123`
 - `ha.token` — HA → Profile → Security → **Long-Lived Access Tokens** → Create.
 - `calendars[].url` — Airbnb → Calendar → Availability → *Connect to another
   website* → export `.ics` URL.
@@ -73,7 +73,7 @@ Lists every `lock.*` entity in HA and which driver can program it, plus a ready
 
 ```yaml
 ha:
-  url: https://ha.iodesystems.com
+  url: http://homeassistant.local:8123
   token: eyJ...
 
 mode: log                  # log = print only; run = perform calls

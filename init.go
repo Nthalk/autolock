@@ -24,7 +24,7 @@ func runInit(configPath string) error {
 
 	fmt.Println("airlock setup wizard")
 	fmt.Println("Home Assistant connection:")
-	url := askValid(in, "  HA URL", "https://homeassistant.local:8123", func(s string) error {
+	url := askValid(in, "  HA URL", "http://homeassistant.local:8123", func(s string) error {
 		if !strings.HasPrefix(s, "http") {
 			return fmt.Errorf("must start with http(s)://")
 		}

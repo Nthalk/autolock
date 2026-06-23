@@ -42,7 +42,7 @@ func setup(configPath string) error {
 	reg := BuildRegistry(cfg.Drivers)
 	ha := NewHA(cfg.HA.URL, cfg.HA.Token)
 
-	check(ha.BaseURL != "", "ha.url set", "set ha.url: https://ha.iodesystems.com")
+	check(ha.BaseURL != "", "ha.url set", "set ha.url: http://homeassistant.local:8123")
 	check(ha.Token != "", "ha.token set", "HA -> Profile -> Security -> Long-Lived Access Tokens")
 
 	verr := cfg.Validate(reg)
