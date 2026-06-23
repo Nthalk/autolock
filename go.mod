@@ -1,4 +1,4 @@
-module github.com/iodesystems/airlock
+module github.com/Nthalk/autolock
 
 go 1.26
 

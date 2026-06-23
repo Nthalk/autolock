@@ -19,6 +19,25 @@ hand-written HA scripts — the lock integration call is built by a Go driver.
 
 Run it from cron; it's a one-shot that acts only on due actions.
 
+## Install
+
+No clone needed (requires Go 1.21+):
+
+```sh
+go install github.com/Nthalk/autolock@latest   # builds the `autolock` binary into $GOBIN
+autolock -init                                 # then run from any directory
+```
+
+Or run it one-off without installing:
+
+```sh
+go run github.com/Nthalk/autolock@latest -init
+```
+
+Both read/write `config.yaml` (and `airlock.state`) in the current directory; run
+from a dedicated folder. The rest of this README uses `go run .` for local
+development — substitute `autolock` once installed.
+
 ## Setup
 
 Easiest path — the wizard probes HA, lets you pick the lock, and writes
