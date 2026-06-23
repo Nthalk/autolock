@@ -1,0 +1,40 @@
+# Copy to config.yaml and fill in. config.yaml is gitignored (it holds secrets).
+# airlock calls Home Assistant directly to program/clear the smart-lock code
+# around each Airbnb reservation.
+
+ha:
+  url: https://ha.example.com
+  # Long-lived access token: HA -> Profile -> Security -> Long-Lived Access Tokens
+  token: ""
+
+# mode: log  -> only prints the HA calls it WOULD make (safe while a guest stays)
+# mode: run  -> performs the calls
+mode: log
+
+# Set the guest's code this long before check-in; clear it this long after checkout.
+setCodeBeforeCheckin: 24h
+clearCodeAfterCheckout: 0h
+
+# Built-in drivers: zwave_js, zha. Add or override a lock model as data:
+#
+# drivers:
+#   acme_lock:
+#     match: [acme]                 # optional: helps `-locks` guess the driver
+#     set:
+#       service: acme.program_code  # domain.service; tokens __ENTITY__ __SLOT__ __CODE__
+#       data: {lock: __ENTITY__, index: __SLOT__, pin: __CODE__}
+#     clear:
+#       service: acme.erase_code
+#       data: {lock: __ENTITY__, index: __SLOT__}
+
+# Each Airbnb iCal feed is bound to a lock and a code slot.
+#   url:    Airbnb -> Calendar -> Availability -> Connect to another website
+#   slot:   lock code slot for this listing
+#   driver: run `airlock -locks` to discover what's available (zwave_js | zha)
+#   entity: the HA lock entity_id
+calendars:
+  - url: https://www.airbnb.com/calendar/ical/XXXXXXX.ics?t=XXXXXXXX
+    slot: 2
+    lock:
+      driver: zwave_js
+      entity: lock.front_door
