@@ -103,20 +103,51 @@ go run . -setup            # diagnose secrets, calendars, HA, drivers, entities
 go run . -list             # show parsed reservations
 go run . -all -dry-run     # print every planned call, ignore timing
 go run . -all              # same as dry-run while mode: log; bypasses state
-go run .                   # perform actions due within -window, exactly once
-go build -o airlock .      # build a binary
+go run .                   # one-shot: perform actions due within -window
+go run . -daemon           # run continuously (refresh every -refresh, check every -window)
+go run . -install systemd  # print a service unit (also: initd, cron)
+go build -o autolock .     # build a binary
 ```
 
-## Cron
+## Running it
 
-```cron
-# hourly; -window should be >= the cron interval so no action is missed
-0 * * * * cd /path/to/airlock && ./airlock >> airlock.log 2>&1
+Two ways: a long-running daemon (recommended), or one-shot from cron.
+
+**Daemon** — refreshes the iCal feeds every `-refresh` (12h default) and checks
+for due actions every `-window` (1h default):
+
+```sh
+autolock -daemon
 ```
+
+**One-shot** — does a single refresh + evaluate and exits; schedule it yourself.
+
+Either way, only one instance runs at a time: a second start exits 0 (guarded by
+`airlock.lock`; `-lock ""` disables).
+
+### Install as a service
+
+Generate a service definition with `-install` (writes the file to stdout,
+install steps to stderr — run it from the *installed* `autolock`, not `go run`):
+
+```sh
+# systemd (runs the daemon)
+autolock -install systemd | sudo tee /etc/systemd/system/autolock.service
+sudo systemctl daemon-reload && sudo systemctl enable --now autolock
+
+# SysV init.d (runs the daemon)
+autolock -install initd | sudo tee /etc/init.d/autolock
+sudo chmod +x /etc/init.d/autolock && sudo update-rc.d autolock defaults
+
+# cron (one-shot hourly; the binary self-locks so overlaps exit cleanly)
+(crontab -l 2>/dev/null; autolock -install cron) | crontab -
+```
+
+### Exactly-once
 
 Each performed action is recorded in `airlock.state` (override with `-state`,
 disable with `-state ""`). A given action — keyed by reservation, type, target
-time, and exact call — fires **exactly once**, so running cron more often than
+time, and exact call — fires **exactly once**, so checking more often than
 `-window` is safe, and a changed reservation date or code re-fires. `-window`
 only sets how far back a still-pending action is allowed to catch up. Entries
 older than 90 days are pruned on load. `-all` bypasses both timing and state to

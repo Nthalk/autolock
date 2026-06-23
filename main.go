@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -27,8 +31,12 @@ func run() error {
 		doInit     = flag.Bool("init", false, "interactive wizard to create config.yaml, then exit")
 		doSetup    = flag.Bool("setup", false, "diagnose configuration and connectivity, then exit")
 		doLocks    = flag.Bool("locks", false, "search HA for compatible locks, then exit")
-		window     = flag.Duration("window", time.Hour, "fire an action if its target falls within the last <window> (set to your cron interval)")
+		window     = flag.Duration("window", time.Hour, "fire an action if its target falls within the last <window> (also the daemon check cadence)")
+		refresh    = flag.Duration("refresh", 12*time.Hour, "daemon: how often to re-fetch the iCal feeds")
+		daemon     = flag.Bool("daemon", false, "run continuously: refresh calendars and act on due actions")
 		statePath  = flag.String("state", "airlock.state", "file recording fired actions for exactly-once (empty to disable)")
+		lockPath   = flag.String("lock", "airlock.lock", "lock file preventing concurrent runs (empty to disable)")
+		install    = flag.String("install", "", "print a service definition and exit: systemd | initd | cron")
 	)
 	flag.Parse()
 
@@ -37,6 +45,9 @@ func run() error {
 	}
 	if *doSetup {
 		return setup(*configPath)
+	}
+	if *install != "" {
+		return printService(*install, *configPath)
 	}
 
 	// Best-effort load so -locks sees config-defined drivers even if the rest of
@@ -66,56 +77,169 @@ func run() error {
 		return fmt.Errorf("state: %w", err)
 	}
 
-	now := time.Now()
-	var failures int
-	for _, cal := range cfg.Calendars {
-		res, err := fetch(cal.URL)
+	if *list {
+		bookings, err := fetchBookings(cfg)
 		if err != nil {
 			return err
 		}
+		for _, b := range bookings {
+			fmt.Printf("%-12s slot=%d last4=%s  %s -> %s  [%s %s]\n",
+				b.res.Code, b.res.Slot, b.res.Last4,
+				b.res.CheckIn.Format("2006-01-02"), b.res.CheckOut.Format("2006-01-02"),
+				b.cal.Lock.Driver, b.cal.Lock.Entity)
+		}
+		return nil
+	}
+
+	if *lockPath != "" {
+		release, err := acquireLock(*lockPath)
+		if err != nil {
+			if errors.Is(err, syscall.EWOULDBLOCK) {
+				fmt.Println("airlock: another instance is running; exiting")
+				return nil
+			}
+			return fmt.Errorf("lock: %w", err)
+		}
+		defer release()
+	}
+
+	rt := &runtime{cfg: cfg, reg: reg, ha: ha, state: state, window: *window, all: *all, logOnly: logOnly}
+	if *daemon {
+		return serve(rt, *refresh)
+	}
+
+	bookings, err := fetchBookings(cfg)
+	if err != nil {
+		return err
+	}
+	if n := rt.evaluate(bookings, time.Now()); n > 0 {
+		return fmt.Errorf("%d call(s) failed", n)
+	}
+	return nil
+}
+
+// booking pairs a reservation with the calendar (lock/slot) it came from.
+type booking struct {
+	res Reservation
+	cal Calendar
+}
+
+func fetchBookings(cfg *Config) ([]booking, error) {
+	var out []booking
+	for _, cal := range cfg.Calendars {
+		res, err := fetch(cal.URL)
+		if err != nil {
+			return nil, err
+		}
 		for _, r := range res {
 			r.Slot = cal.Slot
+			out = append(out, booking{res: r, cal: cal})
+		}
+	}
+	return out, nil
+}
 
-			if *list {
-				fmt.Printf("%-12s slot=%d last4=%s  %s -> %s  [%s %s]\n",
-					r.Code, r.Slot, r.Last4,
-					r.CheckIn.Format("2006-01-02"), r.CheckOut.Format("2006-01-02"),
-					cal.Lock.Driver, cal.Lock.Entity)
+// runtime bundles everything an evaluation pass needs.
+type runtime struct {
+	cfg     *Config
+	reg     Registry
+	ha      *HA
+	state   *State
+	window  time.Duration
+	all     bool
+	logOnly bool
+}
+
+// evaluate performs (or logs) every action due as of now, returning the failure
+// count.
+func (rt *runtime) evaluate(bookings []booking, now time.Time) int {
+	var failures int
+	for _, b := range bookings {
+		for _, a := range plan(rt.cfg, b.res, b.cal, rt.reg) {
+			due := rt.all || (!now.Before(a.Target) && now.Before(a.Target.Add(rt.window)))
+			if !due {
+				continue
+			}
+			tag := fmt.Sprintf("%s %s", b.res.Code, a.Label)
+			if rt.logOnly {
+				fmt.Printf("[%s] @%s would call: %s\n", tag, a.Target.Format("2006-01-02 15:04"), a.Call)
 				continue
 			}
 
-			for _, a := range plan(cfg, r, cal, reg) {
-				due := *all || (!now.Before(a.Target) && now.Before(a.Target.Add(*window)))
-				if !due {
-					continue
-				}
-				tag := fmt.Sprintf("%s %s", r.Code, a.Label)
-				if logOnly {
-					fmt.Printf("[%s] @%s would call: %s\n", tag, a.Target.Format("2006-01-02 15:04"), a.Call)
-					continue
-				}
+			key := strings.Join([]string{b.res.Code, a.Label, a.Target.Format(time.RFC3339), a.Call.String()}, "|")
+			if !rt.all && rt.state.Has(key) {
+				continue // already fired
+			}
 
-				key := strings.Join([]string{r.Code, a.Label, a.Target.Format(time.RFC3339), a.Call.String()}, "|")
-				if !*all && state.Has(key) {
-					continue // already fired
-				}
-
-				fmt.Printf("[%s] @%s calling: %s\n", tag, a.Target.Format("2006-01-02 15:04"), a.Call)
-				if err := ha.CallService(a.Call); err != nil {
-					fmt.Fprintf(os.Stderr, "[%s] call failed: %v\n", tag, err)
-					failures++
-					continue
-				}
-				if err := state.Mark(key, a.Target); err != nil {
-					fmt.Fprintf(os.Stderr, "[%s] warning: could not record state: %v\n", tag, err)
-				}
+			fmt.Printf("[%s] @%s calling: %s\n", tag, a.Target.Format("2006-01-02 15:04"), a.Call)
+			if err := rt.ha.CallService(a.Call); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] call failed: %v\n", tag, err)
+				failures++
+				continue
+			}
+			if err := rt.state.Mark(key, a.Target); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] warning: could not record state: %v\n", tag, err)
 			}
 		}
 	}
-	if failures > 0 {
-		return fmt.Errorf("%d call(s) failed", failures)
+	return failures
+}
+
+// serve runs the daemon loop: refresh the feeds every refresh, evaluate due
+// actions every window, until interrupted.
+func serve(rt *runtime, refresh time.Duration) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	fmt.Printf("airlock daemon: refresh=%s check=%s mode=%s\n", refresh, rt.window,
+		map[bool]string{true: "log", false: "run"}[rt.logOnly])
+
+	var bookings []booking
+	var lastFetch time.Time
+	refetch := func() {
+		bs, err := fetchBookings(rt.cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "refresh failed: %v (keeping %d cached)\n", err, len(bookings))
+			return
+		}
+		bookings, lastFetch = bs, time.Now()
+		fmt.Printf("refreshed: %d reservation(s)\n", len(bookings))
 	}
-	return nil
+
+	refetch()
+	rt.evaluate(bookings, time.Now())
+
+	ticker := time.NewTicker(rt.window)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("airlock daemon: shutting down")
+			return nil
+		case <-ticker.C:
+			if lastFetch.IsZero() || time.Since(lastFetch) >= refresh {
+				refetch()
+			}
+			rt.evaluate(bookings, time.Now())
+		}
+	}
+}
+
+// acquireLock takes an exclusive non-blocking flock; the returned func releases
+// it. EWOULDBLOCK means another instance holds it.
+func acquireLock(path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
 }
 
 // Action is a dated HA call for one reservation.
