@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Validate the module without CI: vet then test, fail fast on either.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+go vet ./...
+go test ./...
