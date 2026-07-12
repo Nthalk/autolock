@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test runner/inspector. Args pass straight through to `go test` so you can drill in:
+#   bin/t                              # whole suite
+#   bin/t -run TestFoo ./internal/...  # one test, one package
+#   bin/t -v -count=1 ./...            # verbose, bypass cache
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+go test "${@:-./...}"

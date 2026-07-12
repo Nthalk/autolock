@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Dependency upgrade helper (no dependency bot on this repo): bump all
+# modules to latest, tidy go.mod/go.sum, then show what changed.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+go get -u ./...
+go mod tidy
+
+echo "--- go.mod/go.sum diff ---"
+git diff -- go.mod go.sum

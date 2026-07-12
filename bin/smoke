@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Minimally-verified gate: compile + lint + test must all pass. No args, no infra.
+# This is what the auto-merge guardrail runs — keep it fast and deterministic.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+go build ./...
+go vet ./...
+go test ./...
